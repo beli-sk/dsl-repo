@@ -1,0 +1,5 @@
+dsl.list
+debian/*.log
+debian/*.substvars
+debian/dsl-repo/
+debian/files

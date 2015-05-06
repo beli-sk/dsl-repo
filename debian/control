@@ -1,0 +1,13 @@
+Source: dsl-repo
+Section: misc
+Priority: optional
+Maintainer: Michal Belica <devel@beli.sk>
+Build-Depends: debhelper (>= 9)
+Standards-Version: 3.9.5
+#Vcs-Git: git://anonscm.debian.org/collab-maint/dsl-repo.git
+#Vcs-Browser: http://anonscm.debian.org/?p=collab-maint/dsl-repo.git;a=summary
+
+Package: dsl-repo
+Architecture: all
+Depends: apt
+Description: DreamSourceLab apt repository
