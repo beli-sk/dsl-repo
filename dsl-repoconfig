@@ -7,14 +7,24 @@ import traceback
 import subprocess
 
 
-LISTFILE = '/etc/apt/sources.list.d/dsl.list'
+LISTFILE = '/etc/apt/sources.list.d/dreamsourcelab.list'
 OUR_SOURCE = 'http://archive.coders.sk/dsl {} main'
+HEADER = [
+        "# DreamSourceLab Debian/Ubuntu repository",
+        "# Added by dsl-repo package.",
+        "# Recommended way to enable/disable is using command",
+        "#   dsl-repoconfig --enable/--disable",
+        "#",
+        ]
 
 source_re = r'^\s*(?P<comment>#)?\s*(?P<keyword>deb(-src)?)\s+(?P<url>.*?)' \
         r'\s+(?P<release>.*?)\s+(?P<components>.*?)\s*$'
 
 
 class SourceParseError(ValueError):
+    pass
+
+class MultipleSourcesError(ValueError):
     pass
 
 
@@ -28,9 +38,15 @@ class Source(object):
             self.url = match.group('url')
             self.release = match.group('release')
             self.components = match.group('components').split()
-            print('found source:', self.render())
         else:
             raise SourceParseError
+    @property
+    def enabled(self):
+        return not self.comment
+
+    @enabled.setter
+    def enabled(self, x):
+        self.comment = not bool(x)
 
     def render(self):
         return '{}{} {} {} {}'.format(
@@ -42,12 +58,20 @@ class Source(object):
                 )
 
 
-class ListFile(object):
+class SourcesList(object):
     def __init__(self, filename=LISTFILE):
+        self.lines = []
+        self.our_sources = {'deb': None, 'deb-src': None}
+        self.template = Source('deb ' + OUR_SOURCE)
         self.filename = filename
 
     def __enter__(self):
-        self.file = open(self.filename, 'r')
+        try:
+            self.file = open(self.filename, 'r+')
+            self.created = False
+        except FileNotFoundError:
+            self.file = open(self.filename, 'w')
+            self.created = True
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -56,18 +80,48 @@ class ListFile(object):
         except:
             pass
 
+    def generate(self):
+        self.lines.clear()
+        self.lines.extend(HEADER)
+
+    def add_missing(self):
+        for keyword, source in self.our_sources.items():
+            if not source:
+                source = Source(' '.join((keyword, OUR_SOURCE)))
+                self.lines.append(source)
+                self.our_sources[keyword] = source
+
     def read(self):
         self.file.seek(0)
-        self.lines = []
-        self.sources = []
+        self.lines.clear()
         for line in self.file:
             line = line.rstrip()
             try:
                 source = Source(line)
                 self.lines.append(source)
-                self.sources.append(source)
+                # if URL is recognized, store as our source
+                if source.url == self.template.url:
+                    # replace same type only if it is enabled
+                    if not self.our_sources[source.keyword] or source.enabled:
+                        # refuse replacing enabled source
+                        if (self.our_sources[source.keyword] and
+                                self.our_sources[source.keyword].enabled):
+                            raise MultipleSourcesError(
+                                    'Multiple enabled "{}" lines found.'.format(
+                                    source.keyword))
+                        self.our_sources[source.keyword] = source
             except SourceParseError:
                 self.lines.append(line.rstrip())
+
+    def modify(self, name, value):
+        """Modify attribute ``name`` with ``value`` on *our* sources.
+        Return True if at least one value was changed."""
+        changed = False
+        for keyword, source in self.our_sources.items():
+            if getattr(source, name) != value:
+                setattr(source, name, value)
+                changed = True
+        return changed
 
     def write(self):
         self.file.seek(0)
@@ -85,20 +139,21 @@ class Application(object):
         self.argv = argv
     
     def get_codename(self):
-        subprocess.check_call(['lsb_release', '-sc'])
+        return subprocess.check_output(['lsb_release', '-sc']).decode('iso-8859-1').strip()
 
     def parse_args(self):
         parser = argparse.ArgumentParser(
                 description='Configure DreamSourceLab repository')
-        # only to be used by package maintainer scripts
-        parser.add_argument(
-                '--pkg-maint', action='store_true', help=argparse.SUPPRESS)
-        parser.add_argument(
+        group = parser.add_mutually_exclusive_group()
+        group.add_argument(
                 '--disable', action='store_true', help='Disable repository')
-        parser.add_argument(
+        group.add_argument(
                 '--enable', action='store_true', help='Enable repository')
         parser.add_argument(
                 '--debug', action='store_true', help='Debug output')
+        # only to be used by package maintainer scripts
+        parser.add_argument(
+                '--pkg-maint', action='store_true', help=argparse.SUPPRESS)
         self.args = parser.parse_args(self.argv)
 
     def print_exception(self):
@@ -115,11 +170,32 @@ class Application(object):
         print(msg, end='', file=sys.stderr)
 
     def main(self, cli=False):
+        self.codename = self.get_codename()
         try:
             self.parse_args()
-            with ListFile() as listfile:
-                listfile.read()
-                listfile.write()
+            with SourcesList() as sources_list:
+                if sources_list.created:
+                    sources_list.generate()
+                    print('Generating new configuration.')
+                else:
+                    sources_list.read()
+                added = sources_list.add_missing()
+                updated = sources_list.modify('release', self.codename)
+                changed = False
+                if self.args.enable:
+                    changed = sources_list.modify('enabled', True)
+                if self.args.disable:
+                    changed = sources_list.modify('enabled', False)
+                if added or updated or changed:
+                    sources_list.write()
+                    if updated:
+                        print('Repository updated to release "{}"'.format(self.codename))
+                    if changed:
+                        print('Repository status changed.')
+                else:
+                    print('Repository configuration not modified.')
+        except SystemExit:
+            raise
         except:
             if not cli:
                 raise

@@ -20,11 +20,7 @@ set -e
 
 case "$1" in
     configure)
-		codename=`lsb_release -sc`
-		# uncomment unconfigured lines
-		sed -i -e "s/^[[:space:]]*#[[:space:]]*\(deb.*%codename%.*\)$/\1/" /etc/apt/sources.list.d/dsl.list
-		# replace %codename% placeholder
-		sed -i -e "s/^\(deb.*\)%codename%\(.*\)/\1${codename}\2/" /etc/apt/sources.list.d/dsl.list
+        /usr/sbin/dsl-repoconfig --pkg-maint
     ;;
 
     abort-upgrade|abort-remove|abort-deconfigure)

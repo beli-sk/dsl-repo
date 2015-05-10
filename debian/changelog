@@ -1,3 +1,10 @@
+dsl-repo (1.1) unstable; urgency=medium
+
+  * Config file handling according to Debian Policy E.2
+    https://www.debian.org/doc/debian-policy/ap-pkg-conffiles.html
+
+ -- Michal Belica <devel@beli.sk>  Sun, 10 May 2015 21:14:24 +0200
+
 dsl-repo (1.0) unstable; urgency=low
 
   * Initial Release.
