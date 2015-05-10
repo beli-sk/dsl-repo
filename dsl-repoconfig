@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+
+import re
+import sys
+import argparse
+import traceback
+import subprocess
+
+
+LISTFILE = '/etc/apt/sources.list.d/dsl.list'
+OUR_SOURCE = 'http://archive.coders.sk/dsl {} main'
+
+source_re = r'^\s*(?P<comment>#)?\s*(?P<keyword>deb(-src)?)\s+(?P<url>.*?)' \
+        r'\s+(?P<release>.*?)\s+(?P<components>.*?)\s*$'
+
+
+class SourceParseError(ValueError):
+    pass
+
+
+class Source(object):
+    def __init__(self, source_line):
+        self.source_cre = re.compile(source_re)
+        match = self.source_cre.match(source_line)
+        if match:
+            self.comment = bool(match.group('comment'))
+            self.keyword = match.group('keyword')
+            self.url = match.group('url')
+            self.release = match.group('release')
+            self.components = match.group('components').split()
+            print('found source:', self.render())
+        else:
+            raise SourceParseError
+
+    def render(self):
+        return '{}{} {} {} {}'.format(
+                '# ' if self.comment else '',
+                self.keyword,
+                self.url,
+                self.release,
+                ' '.join(self.components),
+                )
+
+
+class ListFile(object):
+    def __init__(self, filename=LISTFILE):
+        self.filename = filename
+
+    def __enter__(self):
+        self.file = open(self.filename, 'r')
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            self.file.close()
+        except:
+            pass
+
+    def read(self):
+        self.file.seek(0)
+        self.lines = []
+        self.sources = []
+        for line in self.file:
+            line = line.rstrip()
+            try:
+                source = Source(line)
+                self.lines.append(source)
+                self.sources.append(source)
+            except SourceParseError:
+                self.lines.append(line.rstrip())
+
+    def write(self):
+        self.file.seek(0)
+        self.file.truncate()
+        for line in self.lines:
+            try:
+                self.file.write(line.render())
+            except AttributeError:
+                self.file.write(line)
+            self.file.write('\n')
+
+
+class Application(object):
+    def __init__(self, argv=[]):
+        self.argv = argv
+    
+    def get_codename(self):
+        subprocess.check_call(['lsb_release', '-sc'])
+
+    def parse_args(self):
+        parser = argparse.ArgumentParser(
+                description='Configure DreamSourceLab repository')
+        # only to be used by package maintainer scripts
+        parser.add_argument(
+                '--pkg-maint', action='store_true', help=argparse.SUPPRESS)
+        parser.add_argument(
+                '--disable', action='store_true', help='Disable repository')
+        parser.add_argument(
+                '--enable', action='store_true', help='Enable repository')
+        parser.add_argument(
+                '--debug', action='store_true', help='Debug output')
+        self.args = parser.parse_args(self.argv)
+
+    def print_exception(self):
+        exc_type, exc_value, exc_tb = sys.exc_info()
+        try:
+            if not self.args.debug:
+                exc_tb = None
+        except:
+            pass
+        if exc_tb is None:
+            msg = ''.join(traceback.format_exception_only(exc_type, exc_value))
+        else:
+            msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        print(msg, end='', file=sys.stderr)
+
+    def main(self, cli=False):
+        try:
+            self.parse_args()
+            with ListFile() as listfile:
+                listfile.read()
+                listfile.write()
+        except:
+            if not cli:
+                raise
+            else:
+                self.print_exception()
+
+
+if __name__ == "__main__":
+    Application(sys.argv[1:]).main(cli=True)
+
